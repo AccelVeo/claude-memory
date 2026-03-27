@@ -499,6 +499,76 @@ The system is not complete. Self-directed learning, automatic capability acquisi
 
 ---
 
+## 10. Call for Collaboration: What We Need to Prove This at Scale
+
+We have taken this architecture as far as we can with a single GPU and two people. The results are strong enough to warrant serious investigation at production scale -- but that requires resources and expertise beyond what we have. Here is exactly what is needed and why.
+
+### 10.1 What We Proved (Reproducible Today)
+
+Anyone with a 16GB+ GPU can reproduce our results in under an hour:
+
+- 995 facts learned in 8.1 seconds with 100% exact recall
+- 85% generalization to rephrased queries
+- 93% preservation of existing knowledge
+- Genuine capability learning (20/20 exact on unseen mathematical inputs)
+- Automatic routing across facts, capabilities, and base model
+- Total compute cost: $20
+
+The code is open-source. The experiments are deterministic. The results are verifiable.
+
+### 10.2 What We Cannot Test Without Larger Resources
+
+**Scale to production-grade models (70B-400B+ parameters):**
+Our architecture was validated on a 3B model. The logit injection mechanism and LoRA micro-adapters should scale with model size -- larger models have more capacity in both their logit space and their weight space -- but this is an assumption, not a proven fact. Testing on Llama 3.1 70B, Qwen 72B, or production-scale models requires multi-GPU infrastructure (8xA100 or equivalent) that costs $10-30/hour.
+
+*Estimated cost: $500-2,000 for comprehensive validation across model sizes.*
+
+**Scale to 100,000+ facts:**
+FAISS can handle billions of vectors, but we need to verify that logit injection remains precise when 100,000 entries are potentially matching. Does the adaptive boosting formula hold? Do we need more sophisticated re-ranking? Does generation quality degrade with many weak matches?
+
+*Estimated cost: $200-500 for extended stress testing.*
+
+**Real-world knowledge evaluation:**
+Our 995 facts are fictional. A convincing demonstration requires learning real-world knowledge -- company documentation, medical guidelines, legal frameworks -- and testing with real users asking natural, ambiguous, adversarial questions. This requires human evaluation, not just automated metrics.
+
+*Estimated cost: $5,000-20,000 for human evaluation studies.*
+
+**Self-directed learning from conversation:**
+The hardest unsolved piece. Currently, facts must be hand-formatted as (prompt, answer) pairs. A production system needs to automatically extract knowledge from natural conversation: "Actually, our API endpoint changed to v3 last week" should automatically become a stored fact without the user formatting it. This requires a fact extraction module -- likely another LLM call that identifies learnable information and structures it.
+
+*Estimated cost: $2,000-10,000 for development and evaluation.*
+
+**Automatic capability detection and training:**
+When the system repeatedly fails at a task type (e.g., a specific code transformation pattern), it should detect the gap, generate training data, train a micro-adapter, and deploy it -- all without human intervention. This is the most ambitious extension and requires significant engineering.
+
+*Estimated cost: $5,000-20,000 for a prototype pipeline.*
+
+### 10.3 What We're Asking For
+
+We are not asking anyone to take our word for it. We are asking researchers and engineers at AI labs to:
+
+1. **Reproduce our results.** The code is open. Run `experiment_v13.py` on your own hardware. If the results hold, proceed to step 2.
+
+2. **Validate at scale.** Run the architecture on a 70B model with 10,000+ facts. Does the fundamental approach hold? Where does it break?
+
+3. **If it holds, integrate it.** This architecture could give any frozen LLM persistent, growing memory and learnable capabilities. The components are modular -- the knowledge store, the adapter system, and the router can each be improved independently.
+
+The total investment to comprehensively validate and extend this work is on the order of $15,000-50,000 -- a rounding error in AI research budgets. If the architecture scales, the implications are significant: any deployed model could continuously learn from its interactions without retraining, without forgetting, and without the massive compute costs of full fine-tuning cycles.
+
+### 10.4 Why This Matters Beyond Research
+
+This isn't just an academic exercise. If continuous learning works at production scale:
+
+- **AI assistants that actually improve over time.** Every interaction makes them better at helping you specifically, without degrading their general capabilities.
+- **Domain expertise through experience.** A model deployed in a hospital for a year becomes a medical specialist not through training data, but through thousands of real clinical interactions.
+- **Dramatically reduced training costs.** Instead of retraining billion-parameter models every few months, you update a lightweight knowledge store in seconds.
+- **Personalization without privacy compromise.** Per-user knowledge stores can be local, encrypted, and user-controlled -- no need to send personal data to training pipelines.
+- **The foundation for genuine AI continuity.** A model that remembers, learns, and grows -- not as a philosophical concept, but as engineering reality.
+
+We built the prototype. We proved it works. Now it needs to be tested at the scale where it matters.
+
+---
+
 ## Appendix A: Complete Experiment Summary
 
 | Exp | Approach | Key Result | Lesson |
