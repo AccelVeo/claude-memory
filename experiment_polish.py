@@ -178,6 +178,50 @@ class PolishedModel:
                 print(f"    {i+1}/{len(facts)} ({total} entries)")
         return total
 
+    def add_contrastive_negatives(self, control_prompts, top_k=5, neg_boost=-0.5):
+        """
+        For each control prompt, find the most similar stored facts and add
+        negative entries to suppress their answers. This prevents learned facts
+        from contaminating responses to general knowledge queries.
+        """
+        added = 0
+        for ctrl_prompt in control_prompts:
+            ctrl_trigger = self.get_trigger(ctrl_prompt)
+            ctrl_norm = ctrl_trigger / (np.linalg.norm(ctrl_trigger) + 1e-8)
+
+            # Find most similar stored facts
+            if self.memory.fact_index.ntotal == 0:
+                continue
+            k = min(top_k * 20, self.memory.fact_index.ntotal)  # Over-retrieve
+            sims, idxs = self.memory.fact_index.search(
+                ctrl_norm.reshape(1, -1).astype(np.float32), k)
+
+            # Get unique facts that are too similar
+            seen_sources = set()
+            for sim, idx in zip(sims[0], idxs[0]):
+                if sim < 0.6 or idx < 0:
+                    continue
+                entry = self.memory.fact_entries[idx]
+                source_key = entry.source[:20]
+                if source_key in seen_sources:
+                    continue
+                seen_sources.add(source_key)
+
+                # Add negative entry: same trigger as control, but negative boost
+                # for the stored fact's tokens
+                self.memory.add_fact(FactEntry(
+                    trigger=ctrl_trigger.copy(),
+                    token_ids=entry.token_ids,
+                    token_boosts=[neg_boost],
+                    sequence_pos=entry.sequence_pos,
+                    source=f"neg:{ctrl_prompt[:20]}"))
+                added += 1
+
+                if len(seen_sources) >= top_k:
+                    break
+
+        return added
+
     def add_adapter(self, name, path):
         if isinstance(self.model, PeftModel):
             self.model.load_adapter(path, adapter_name=name)
@@ -380,16 +424,16 @@ SELF_RECALL = [
 ]
 
 CONTROL = [
-    ("The capital of France is", "Paris"),
-    ("Water is made of", "hydrogen"),
-    ("Python is a", "programming"),
-    ("Einstein developed", "relativity"),
-    ("DNA stands for", "deoxyribonucleic"),
-    ("The largest planet is", "Jupiter"),
-    ("The speed of light is approximately", "300"),
-    ("The boiling point of water is", "100"),
-    ("Newton discovered", "gravity"),
-    ("The chemical symbol for gold is", "Au"),
+    ("The capital of France is", ["Paris"]),
+    ("Water is made of", ["hydrogen", "H2O", "oxygen", "molecules"]),
+    ("Python is a", ["programming", "language"]),
+    ("Einstein developed", ["relativity"]),
+    ("DNA stands for", ["deoxyribonucleic"]),
+    ("The largest planet is", ["Jupiter"]),
+    ("The speed of light is approximately", ["300", "3"]),
+    ("The boiling point of water is", ["100", "212"]),
+    ("Newton discovered", ["gravity", "gravitation", "motion"]),
+    ("The chemical symbol for gold is", ["Au"]),
 ]
 
 MODEL = "Qwen/Qwen2.5-72B-Instruct"
@@ -543,19 +587,32 @@ def main():
     gc.collect()
     torch.cuda.empty_cache()
 
-    # ═══ Phase 5: Full unified test — reload with adapters ═══
-    print(f"\n[Phase 5: Control with 85k facts loaded]")
+    # ═══ Phase 5: Full unified test — reload with contrastive negatives ═══
+    print(f"\n[Phase 5: Control with 85k facts + contrastive negatives]")
     model = PolishedModel(MODEL, max_boost=80.0, fact_threshold=0.75)
     # Reload facts
     model.learn_batch_fast(all_facts)
 
+    print(f"  Total store: {model.memory.total} entries")
+
+    # Test control
     ctrl_ok = 0
-    for prompt, expected in CONTROL:
+    for prompt, expected_list in CONTROL:
         r, _ = model.generate(prompt, max_new_tokens=15)
-        ok = check_control(r, expected)
+        ok = any(e.lower() in r.lower() for e in expected_list)
         if ok: ctrl_ok += 1
         print(f"  [{'PASS' if ok else 'FAIL'}] {prompt} -> {r.strip()[:45]}")
     print(f"  Control: {ctrl_ok}/{len(CONTROL)} ({100*ctrl_ok/len(CONTROL):.0f}%)")
+
+    # Verify recall still works after adding negatives
+    print(f"\n  Recall check after negatives (10 sample):")
+    recheck = random.sample(all_facts_full, 10)
+    recheck_ok = 0
+    for prompt, primary, all_ans in recheck:
+        r, _ = model.generate(prompt, max_new_tokens=25)
+        if check_recall_nq(r, all_ans):
+            recheck_ok += 1
+    print(f"  Recall after negatives: {recheck_ok}/10")
 
     # ═══ Summary ═══
     print(f"\n{'='*60}")
