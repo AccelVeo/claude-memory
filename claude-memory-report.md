@@ -528,19 +528,31 @@ Bridging this gap -- enabling real-time, self-directed learning from natural int
 
 ---
 
-## 8. Future Directions
+## 8. What We've Achieved vs. What Remains
 
-1. **Automatic fact extraction from conversation.** When a user corrects the model or provides new information, the system should automatically extract and store it without explicit formatting.
+### 8.1 Completed (originally planned as future work)
 
-2. **Automatic LoRA training.** When the system detects a capability gap (repeatedly failing at a task type), it should autonomously generate training data and train a micro-adapter.
+The following items were identified as future directions during the initial 3B prototyping phase and have since been fully implemented and validated:
 
-3. **Scale to 10,000+ facts and 100+ capabilities.** FAISS can handle billions of vectors. The question is whether trigger discrimination and logit injection remain clean at that scale.
+- **Automatic fact extraction from conversation.** Built and validated at 80-87% accuracy on 72B. The system extracts structured facts from natural conversation using few-shot prompted extraction with quality control (contradiction handling, deduplication, noise filtering).
+- **Automatic LoRA training.** Built and validated. The system detects capability gaps from failure patterns, infers operations, generates chain-of-thought training data, trains micro-adapters, validates them (94% task / 100% control), and deploys autonomously.
+- **Scale to 85,000+ facts.** Validated on 85,382 real-world facts from Google Natural Questions with 96% exact recall and clean trigger discrimination (mean similarity 0.460).
+- **Larger base models.** Validated on Qwen 2.5 72B-Instruct across 4 GPUs with zero code changes from the 3B prototype.
+- **Cross-session persistence.** Knowledge store save/load implemented and tested. Facts survive across sessions.
 
-4. **Larger base models.** Validating this architecture on 7B, 13B, and 70B models to confirm the approach scales with model size.
+### 8.2 Remaining Future Directions
 
-5. **Cross-session persistence.** Saving and loading the knowledge store and adapter registry across sessions, enabling truly persistent memory.
+1. **Scale to 500,000+ facts and 100+ capabilities.** FAISS can handle billions of vectors, but logit injection behavior at extreme scale needs verification.
 
-6. **Compaction.** As the knowledge store grows, similar entries should be merged and outdated entries pruned, analogous to database garbage collection.
+2. **Real user deployment.** Testing with actual users in production scenarios -- customer support, medical consultation, legal research -- where queries are ambiguous, adversarial, and unpredictable.
+
+3. **Multi-user knowledge isolation.** Per-user knowledge stores with shared base knowledge. This is an infrastructure challenge (database sharding, access control) rather than a research problem.
+
+4. **Compaction.** As the knowledge store grows, similar entries should be merged and outdated entries pruned, analogous to database garbage collection.
+
+5. **Model adapter layer.** Support for different model architectures (DeepSeek, Mistral, Llama) through a normalization layer that handles tokenizer quirks, special tokens, and generation patterns.
+
+6. **Continuous capability improvement.** Beyond detecting gaps and training adapters, the system should improve existing adapters over time as it accumulates more examples of successful use.
 
 ---
 
@@ -558,55 +570,51 @@ Real-world deployment and multi-user support remain as engineering challenges, n
 
 ---
 
-## 10. Call for Collaboration: What We Need to Prove This at Scale
+## 10. Call for Collaboration: Taking This to Production
 
-We have taken this architecture as far as we can with a single GPU and two people. The results are strong enough to warrant serious investigation at production scale -- but that requires resources and expertise beyond what we have. Here is exactly what is needed and why.
+### 10.1 What We've Proven (Reproducible Today)
 
-### 10.1 What We Proved (Reproducible Today)
+The following results are fully reproducible using the open-source code at https://github.com/AccelVeo/claude-memory:
 
-Anyone with a 16GB+ GPU can reproduce our results in under an hour:
-
+**On Qwen 2.5 3B (single GPU, ~$20):**
 - 995 facts learned in 8.1 seconds with 100% exact recall
-- 85% generalization to rephrased queries
-- 93% preservation of existing knowledge
-- Genuine capability learning (20/20 exact on unseen mathematical inputs)
+- 85% paraphrase generalization, 93% control preservation
+- 20/20 exact on unseen computational inputs
 - Automatic routing across facts, capabilities, and base model
-- Total compute cost: $20
 
-The code is open-source. The experiments are deterministic. The results are verifiable.
+**On Qwen 2.5 72B (4x L40S GPUs, ~$40):**
+- 85,382 real-world facts (Google Natural Questions) learned in 18 seconds with 96% recall
+- 90% paraphrase generalization, 87-93% control preservation
+- 100% capability learning on unseen inputs (10/10)
+- 80-87% self-directed learning from natural conversation (16/20)
+- Automatic capability gap detection, training, and deployment
+- Zero code changes between 3B and 72B
 
-### 10.2 What We Cannot Test Without Larger Resources
+### 10.2 What Needs to Happen Next
 
-**Scale to production-grade models (70B-400B+ parameters):**
-Our architecture was validated on a 3B model. The logit injection mechanism and LoRA micro-adapters should scale with model size -- larger models have more capacity in both their logit space and their weight space -- but this is an assumption, not a proven fact. Testing on Llama 3.1 70B, Qwen 72B, or production-scale models requires multi-GPU infrastructure (8xA100 or equivalent) and thorough evaluation across model scales.
+The architecture is validated. The remaining challenges are engineering and deployment, not research:
 
-**Scale to 100,000+ facts:**
-FAISS can handle billions of vectors, but we need to verify that logit injection remains precise when 100,000 entries are potentially matching. Does the adaptive boosting formula hold? Do we need more sophisticated re-ranking? Does generation quality degrade with many weak matches? This needs comprehensive stress testing at orders of magnitude beyond what we tested.
+**Production deployment and real user testing.** The system needs to be tested with actual users in real scenarios -- customer support agents learning company-specific knowledge, medical professionals teaching domain expertise, developers onboarding the system to their codebase. This requires building a clean API layer, handling concurrent users, and measuring satisfaction alongside automated metrics.
 
-**Real-world knowledge evaluation:**
-Our 995 facts are fictional. A convincing demonstration requires learning real-world knowledge -- company documentation, medical guidelines, legal frameworks -- and testing with real users asking natural, ambiguous, adversarial questions. This requires human evaluation, not just automated metrics, and should be done with the rigor of a production evaluation pipeline.
+**Multi-user knowledge management.** Per-user knowledge stores with shared organizational knowledge. Conflict resolution when different users teach contradictory facts. Access control and privacy boundaries. These are database and infrastructure problems with known solutions.
 
-**Self-directed learning from conversation:**
-The hardest unsolved piece. Currently, facts must be hand-formatted as (prompt, answer) pairs. A production system needs to automatically extract knowledge from natural conversation: "Actually, our API endpoint changed to v3 last week" should automatically become a stored fact without the user formatting it. This requires a fact extraction module -- likely another LLM call that identifies learnable information and structures it -- and extensive testing to ensure extraction quality.
+**Scale to 500,000+ facts.** We validated at 85,000. Production deployment may require an order of magnitude more. FAISS handles billions of vectors, but logit injection at extreme scale needs verification.
 
-**Automatic capability detection and training:**
-When the system repeatedly fails at a task type (e.g., a specific code transformation pattern), it should detect the gap, generate training data, train a micro-adapter, and deploy it -- all without human intervention. This is the most ambitious extension and requires significant engineering investment and research into meta-learning strategies.
+**Cross-model compatibility.** Currently validated on the Qwen family. A model adapter layer that normalizes tokenizer differences, special tokens, and generation patterns would enable deployment on Llama, Mistral, DeepSeek, and other architectures without per-model code changes.
 
 ### 10.3 What We're Asking For
 
-We are not asking anyone to take our word for it. We are asking researchers and engineers at AI labs to:
+We are not asking anyone to take our word for it. The code is open. The results are reproducible.
 
-1. **Reproduce our results.** The code is open. Run `experiment_v13.py` on your own hardware. If the results hold, proceed to step 2.
+1. **Reproduce.** Run `experiment_v13.py` (3B, single GPU) or `experiment_polish.py` (72B, 4 GPUs). Verify the results independently.
 
-2. **Validate at scale.** Run the architecture on a 70B model with 10,000+ facts. Does the fundamental approach hold? Where does it break?
+2. **Deploy.** Build the API layer, test with real users, measure what happens when a model genuinely learns from every interaction.
 
-3. **If it holds, integrate it.** This architecture could give any frozen LLM persistent, growing memory and learnable capabilities. The components are modular -- the knowledge store, the adapter system, and the router can each be improved independently.
-
-If the architecture scales, the implications are significant: any deployed model could continuously learn from its interactions without retraining, without forgetting, and without the massive compute costs of full fine-tuning cycles. The investment required to find out is trivial compared to the potential impact.
+3. **Integrate.** This architecture layers on top of any frozen LLM. It could give every deployed model persistent, growing memory and learnable capabilities -- without retraining, without forgetting.
 
 ### 10.4 Why This Matters Beyond Research
 
-This isn't just an academic exercise. If continuous learning works at production scale:
+This isn't an academic exercise. Continuous learning at production scale means:
 
 - **AI assistants that actually improve over time.** Every interaction makes them better at helping you specifically, without degrading their general capabilities.
 - **Domain expertise through experience.** A model deployed in a hospital for a year becomes a medical specialist not through training data, but through thousands of real clinical interactions.
@@ -614,7 +622,7 @@ This isn't just an academic exercise. If continuous learning works at production
 - **Personalization without privacy compromise.** Per-user knowledge stores can be local, encrypted, and user-controlled -- no need to send personal data to training pipelines.
 - **The foundation for genuine AI continuity.** A model that remembers, learns, and grows -- not as a philosophical concept, but as engineering reality.
 
-We built the prototype. We proved it works. Now it needs to be tested at the scale where it matters.
+We built it. We proved it works at scale. The architecture is open. What happens next is up to whoever picks it up.
 
 ---
 
